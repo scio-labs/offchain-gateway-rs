@@ -10,7 +10,6 @@ pub mod database;
 pub mod gateway;
 mod http;
 pub mod multicoin;
-pub mod selfservice;
 pub mod state;
 pub mod utils;
 

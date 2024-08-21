@@ -17,12 +17,8 @@ pub async fn serve(state: GlobalState) {
     let app = Router::new()
         .route("/", get(root))
         .route("/gateway", post(crate::gateway::endpoint::route));
-
-    #[cfg(feature = "selfservice")]
-    let app = app.route("/update", post(crate::selfservice::endpoint::route));
-
+        
     let app = app
-        .route("/view/:name", get(crate::selfservice::view::route))
         .with_state(Arc::new(state))
         .layer(CorsLayer::very_permissive());
 
