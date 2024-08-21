@@ -29,7 +29,16 @@ async fn main() {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    let db = database::bootstrap().await;
+    let url = env::var("PROVIDER_URL").unwrap_or("wss://ws.test.azero.dev".into());
+    let tld_to_contract = vec![
+        ("azero", "5CTQBfBC9SfdrCDBJdfLiyW2pg9z5W6C6Es8sK313BLnFgDf"),
+        ("tzero", "5FsB91tXSEuMj6akzdPczAtmBaVKToqHmtAwSUzXh49AYzaD"),
+    ]
+    .into_iter()
+    .map(|(tld, contract)| (String::from(tld), contract.parse().expect("decode failed")))
+    .collect();
+
+    let db = database::bootstrap(url, tld_to_contract).await;
 
     let wallet: LocalWallet = LocalWallet::from_str(
         env::var("PRIVATE_KEY")
