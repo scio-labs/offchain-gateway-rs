@@ -3,9 +3,17 @@ use bs58::Alphabet;
 
 use super::{MulticoinEncoder, MulticoinEncoderError};
 
-pub struct PolkadotEncoder {}
+pub struct PolkadotEncoder {
+    pub dot_type: u8
+}
 
 static HASH_PREFIX: &[u8] = b"SS58PRE";
+
+impl PolkadotEncoder {
+    pub fn new(dot_type: u8) -> Self {
+        Self { dot_type }
+    }
+}
 
 impl MulticoinEncoder for PolkadotEncoder {
     fn encode(&self, data: &str) -> Result<Vec<u8>, MulticoinEncoderError> {
@@ -26,7 +34,7 @@ impl MulticoinEncoder for PolkadotEncoder {
         let data = &decoded[1..hash_begin];
 
         let mut hasher = Blake2b512::new();
-        hasher.update([HASH_PREFIX, &[0], data].concat());
+        hasher.update([HASH_PREFIX, &[self.dot_type], data].concat());
 
         let check_hash = hasher.finalize();
 

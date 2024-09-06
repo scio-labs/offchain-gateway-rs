@@ -56,7 +56,6 @@ impl UnresolvedQuery<'_> {
 
                 let value: String = state.db.addr(&self.name, *chain).await;
 
-                // DISCUSS: should we do this?
                 let bytes = CoinType::from(*chain as u32).encode(&value).map_err(|err| {
                     debug!("error while trying to encode {}: {}", chain, err);
                     ResolveError::Unparsable

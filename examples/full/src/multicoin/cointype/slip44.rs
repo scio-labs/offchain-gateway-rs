@@ -15,6 +15,8 @@ pub enum SLIP44 {
     Dogecoin,
     Ethereum,
     Polkadot,
+    Kusama,
+    AlephZero,
     Rootstock,
     EthereumClassic,
     Other(U256),
@@ -36,6 +38,8 @@ impl From<u32> for SLIP44 {
             714 => SLIP44::Binance,
             501 => SLIP44::Solana,
             354 => SLIP44::Polkadot,
+            434 => SLIP44::Kusama,
+            643 => SLIP44::AlephZero,
             val => SLIP44::Other(val.into()),
         }
     }
