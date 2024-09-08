@@ -1,5 +1,6 @@
-use std::{env, str::FromStr};
-
+use std::{env, path::Path, fs::File, io::BufReader, str::FromStr};
+use std::collections::HashMap;
+use subxt::utils::AccountId32;
 use dotenvy::dotenv;
 use ethers::signers::{LocalWallet, Signer};
 use tracing::{info, Level};
@@ -30,13 +31,10 @@ async fn main() {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let url = env::var("PROVIDER_URL").unwrap_or("wss://ws.test.azero.dev".into());
-    let tld_to_contract = vec![
-        ("azero", "5CTQBfBC9SfdrCDBJdfLiyW2pg9z5W6C6Es8sK313BLnFgDf"),
-        ("tzero", "5FsB91tXSEuMj6akzdPczAtmBaVKToqHmtAwSUzXh49AYzaD"),
-    ]
-    .into_iter()
-    .map(|(tld, contract)| (String::from(tld), contract.parse().expect("decode failed")))
-    .collect();
+    
+    let path = env::var("SUPPORTED_TLD_PATH").unwrap_or("supported-tlds.json".into());
+    let path = Path::new(&path);
+    let tld_to_contract = get_supported_tlds(path);
 
     let db = database::bootstrap(url, tld_to_contract).await;
 
@@ -55,6 +53,18 @@ async fn main() {
     http::serve(state).await;
 
     info!("Shutting down");
+}
+
+fn get_supported_tlds(path: &std::path::Path) -> Vec<(String, AccountId32)> {
+    let file = File::open(path).expect("file couldn't be opened");
+    let reader = BufReader::new(file);
+
+    let tld_to_contract: HashMap<String, String> = serde_json::from_reader(reader).expect("failed to parse");
+    
+    tld_to_contract
+        .into_iter()
+        .map(|(tld, contract)| (tld, contract.parse().expect("decode failed")))
+        .collect()
 }
 
 // let mut records = HashMap::new();
