@@ -11,20 +11,21 @@ This is a Rust implementation of the [CCIP gateway](https://alpha-docs.ens.domai
 ## Features
 
 - CCIP Spec Compliant Gateway Endpoint
-- `postgres` - Transparent Database backend.
-- `self-service` - Authentication-based updating records.
-- `eoa-self-service` - EOA-based Authentication. (TODO)
+- `AZERO-ID` - reads from AZERO-ID registry.
 - Modular authentication for EOA, Admin API, & more.
 - View endpoint for profile data.
 
 ## Setup
 
 ### Run the gateway
-The gateway is just a docker container / standalone binary. You can run it with docker-compose or just run the binary.
-
-```yaml
-cargo run
-```
+1. Set appropriate TLDs and their target registry in `./supported-tlds.json` (file path settable)
+2. Set the env variables, for example:
+    ```
+    export PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+    export PROVIDER_URL="wss://ws.test.azero.dev"
+    export SUPPORTED_TLD_PATH="./supported-tlds.json"
+    ```
+3. Execute `cargo run`
 
 ### Deploy a Resolver
 
@@ -53,28 +54,3 @@ You might also be interested in the [resolution logic](https://github.com/ensdom
 This gateway implementation is designed to be modular, light, and easy to integrate. It comes with the abstract Datastore idea, (by default implemented with postgres), authentication, simple resolution logic, and a self-service API.
 
 This means that depending on your use case you can easily swap out the database, the resolution logic, and customize authentication.
-
-### Issuing a name
-
-To issue a name from an trusted server, you can simply `POST` to `example.com/update` with a JSON body such as
-
-```json
-{
-    "name": "luc.willbreak.eth",
-    "records": {
-        "name": "Luc",
-        "text": "hello world",
-        "avatar": "https://avatars.githubusercontent.com/u/11744586?v=4",
-    },
-    "addresses": {
-        "60": "0x225f137127d9067788314bc7fcc1f36746a3c3B5"
-    },
-    "auth": "yes"
-}
-```
-
-In a similar fashion users could self-service their names by using this api endpoint and custom authentication logic.
-
-### Viewing a name
-
-In events were our app might not have access to ethereum specific tooling, we can use the `GET` endpoint `example.com/view/luc.willbreak.eth` to view the data of a name. This endpoint can be helpful for showing profile editing pages and more.
