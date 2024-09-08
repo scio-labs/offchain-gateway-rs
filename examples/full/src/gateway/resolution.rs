@@ -44,17 +44,7 @@ impl UnresolvedQuery<'_> {
                     return Err(ResolveError::HashMismatch);
                 }
 
-                let hash = namehash(&self.name).to_fixed_bytes().to_vec();
-
-                let x = state.db.get_records(&hash, &[record]).await;
-
-                let value = x
-                    .get(record)
-                    .to_owned()
-                    .ok_or(ResolveError::NotFoundRecord(record.clone()))?
-                    .clone()
-                    .ok_or(ResolveError::NotFoundRecord(record.clone()))?;
-
+                let value = state.db.text(&self.name, record).await;
                 vec![Token::String(value)]
             }
             ResolverFunctionCall::AddrMultichain(_bf, chain) => {
@@ -64,17 +54,9 @@ impl UnresolvedQuery<'_> {
                     "Resolution Address Multichain"
                 );
 
-                let hash = namehash(&self.name).to_fixed_bytes().to_vec();
+                let value: String = state.db.addr(&self.name, *chain).await;
 
-                let addresses = state.db.get_addresses(&hash, &[&chain.to_string()]).await;
-
-                let value: &str = addresses
-                    .get(&chain.to_string())
-                    .ok_or(ResolveError::NotFound)?
-                    .as_ref()
-                    .ok_or(ResolveError::NotFound)?;
-
-                let bytes = CoinType::from(*chain as u32).encode(value).map_err(|err| {
+                let bytes = CoinType::from(*chain as u32).encode(&value).map_err(|err| {
                     debug!("error while trying to encode {}: {}", chain, err);
                     ResolveError::Unparsable
                 })?;
@@ -85,16 +67,7 @@ impl UnresolvedQuery<'_> {
                 info!(name = self.name, "Resolution Address");
 
                 let chain = 60;
-                let hash = namehash(&self.name).to_fixed_bytes().to_vec();
-
-                let x = state.db.get_addresses(&hash, &[&chain.to_string()]).await;
-
-                let value = x
-                    .get(&chain.to_string())
-                    .to_owned()
-                    .ok_or(ResolveError::NotFound)?
-                    .clone()
-                    .ok_or(ResolveError::NotFound)?;
+                let value = state.db.addr(&self.name, chain).await;
 
                 let address = value.parse().map_err(|_| ResolveError::Unparsable)?;
 

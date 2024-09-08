@@ -1,161 +1,148 @@
-use std::{collections::HashMap, env};
+use subxt::config::Hasher;
+use subxt::utils::AccountId32;
+use subxt::{OnlineClient, PolkadotConfig};
+use subxt::ext::codec::{Decode, Encode};
+use std::collections::HashMap;
 
-use tokio_postgres::NoTls;
-use tracing::{error, info};
+#[subxt::subxt(runtime_metadata_path = "azero_metadata.scale")]
+pub mod azero {}
+
+const AZERO_COIN_TYPE: u64 = 643;
+const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
 
 pub struct Database {
-    pub client: tokio_postgres::Client,
+    api: OnlineClient<PolkadotConfig>,
+    tld_to_contract: HashMap<String, AccountId32>,
 }
 
 /// Connects to database
-pub async fn bootstrap() -> Database {
-    info!("Bootstrapping the database...");
-    let (client, connection) = tokio_postgres::connect(
-        &format!(
-            "host={} user={} password={}",
-            env::var("POSTGRES_HOST").unwrap_or("localhost".to_string()),
-            env::var("POSTGRES_USER").unwrap_or("postgres".to_string()),
-            env::var("POSTGRES_PASSWORD").unwrap_or("example".to_string()),
-        ),
-        NoTls,
-    )
-    .await
-    .unwrap();
-
-    // The connection object performs the actual communication with the database,
-    // so spawn it off to run on its own.
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            error!("connection error: {}", e);
-        }
-    });
-
-    info!("Creating the database...");
-    // Now we can execute a simple statement that just returns its parameter.
-    // let rows = client.query("SELECT $1::TEXT", &[&"hello world"]).await?;
-
-    client
-        .batch_execute("CREATE EXTENSION IF NOT EXISTS hstore;")
+pub async fn bootstrap(url: String, tld_to_contract: Vec<(String, AccountId32)>) -> Database {
+    let api = OnlineClient::<PolkadotConfig>::from_url(url)
         .await
-        .unwrap();
-
-    client.batch_execute("CREATE TABLE IF NOT EXISTS ens_data (node BYTEA PRIMARY KEY, records HSTORE, addresses HSTORE);").await.unwrap();
-
-    let total_rows = client
-        .query("SELECT COUNT(*) FROM ens_data", &[])
-        .await
-        .unwrap();
-
-    info!("Total rows: {}", total_rows[0].get::<_, i64>(0));
-
-    Database { client }
+        .expect("Failed to connect");
+    
+    Database { 
+        api,
+        tld_to_contract: tld_to_contract.into_iter().collect(), 
+    }
 }
 
 impl Database {
-    pub async fn upsert(
-        &self,
-        node: &Vec<u8>,
-        records: &HashMap<String, Option<String>>,
-        addresses: &HashMap<String, Option<String>>,
-    ) {
-        self.client
-            .execute(
-                "INSERT INTO ens_data (node, records, addresses) VALUES ($1, $2, $3) ON CONFLICT (node) DO UPDATE SET records = $2, addresses = $3",
-                &[node, records, addresses],
-            )
-            .await
-            .unwrap();
+    pub async fn text(&self, domain: &str, key: &str) -> String {
+        let (name, tld) = self.process_domain(domain);
+        let contract = self.get_contract(&tld).expect("TLD not supported");
+
+        let msg = (get_selector("get_record"), name, key).encode();
+        let encoded_resp = self.call_contract(contract, msg).await;
+        
+        let value: Result<String, u8> = Decode::decode(&mut &encoded_resp[..]).expect("failed to decode");        
+        value.unwrap_or_default()
     }
 
-    pub async fn get_records(
-        &self,
-        node: &[u8],
-        records: &[&str],
-    ) -> HashMap<String, Option<String>> {
-        // require that every record matches /a-zA-Z\./
-        // if records.iter().any(|x| !x.chars().all(|c| c.is_alphanumeric() || c == '.')) {
-        //     panic!("Invalid record name");
-        // }
-
-        // converts ['avatar', 'header'] to "records->'avatar', records->'header'"
-        let records_raw = records.iter().fold(String::new(), |acc, x| {
-            if acc.is_empty() {
-                format!("records->'{}'", x)
-            } else {
-                format!("{}, records->'{}'", acc, x)
+    pub async fn addr(&self, domain: &str, coin_type: u64) -> String {
+        let mut address = String::new();
+        if coin_type == AZERO_COIN_TYPE {
+            address = self.get_resolver_address(domain).await;
+        } else {
+            if let Some(alias) = get_alias(coin_type) {
+                let service_key = format!("address.{alias}");
+                address = self.text(domain, &service_key).await;
             }
-        });
 
-        let x = self
-            .client
-            .query_one(
-                &format!("SELECT {} FROM ens_data WHERE node = $1", records_raw),
-                &[&node],
-            )
-            .await
-            .unwrap();
-
-        records
-            .iter()
-            .enumerate()
-            .fold(HashMap::new(), |mut map, (i, record)| {
-                map.insert(record.to_string(), x.get::<_, Option<String>>(i));
-                map
-            })
-    }
-
-    pub async fn get_addresses(
-        &self,
-        node: &[u8],
-        addresses: &[&str],
-    ) -> HashMap<String, Option<String>> {
-        // require that every record matches /a-zA-Z\./
-        // if records.iter().any(|x| !x.chars().all(|c| c.is_alphanumeric() || c == '.')) {
-        //     panic!("Invalid record name");
-        // }
-
-        // converts ['avatar', 'header'] to "records->'avatar', records->'header'"
-        let addresses_raw = addresses.iter().fold(String::new(), |acc, x| {
-            if acc.is_empty() {
-                format!("addresses->'{}'", x)
-            } else {
-                format!("{}, addresses->'{}'", acc, x)
+            if address.is_empty() {
+                let service_key = format!("address.{coin_type}");
+                address = self.text(domain, &service_key).await;
             }
-        });
+        }
 
-        info!("node = {:?}", hex::encode(node));
-
-        let x = self
-            .client
-            .query_one(
-                &format!("SELECT {} FROM ens_data WHERE node = $1", addresses_raw),
-                &[&node],
-            )
-            .await
-            .unwrap();
-
-        addresses
-            .iter()
-            .enumerate()
-            .fold(HashMap::new(), |mut map, (i, record)| {
-                map.insert(record.to_string(), x.get::<_, Option<String>>(i));
-                map
-            })
+        if address.is_empty() {
+            address = match coin_type == 60 {
+                true => ZERO_ADDRESS,
+                false => "0x",
+            }.to_string();
+        }
+        
+        address
     }
 
-    pub async fn get_all(&self, node: &[u8]) -> (HashMap<String, Option<String>>, HashMap<String, Option<String>>) {
-        let x = self
-            .client
-            .query_one(
-                "SELECT records, addresses FROM ens_data WHERE node = $1",
-                &[&node],
-            )
+    async fn call_contract(&self, contract: AccountId32, msg: Vec<u8>) -> Vec<u8> {
+        let payload = azero::apis().contracts_api().call(
+            AccountId32([1u8;32]),
+            contract,
+            0,
+            None,
+            None,
+            msg,
+        );
+    
+        let rs = self.api
+            .runtime_api()
+            .at_latest()
             .await
-            .unwrap();
-
-        let records = x.get::<_, HashMap<String, Option<String>>>(0);
-        let addresses = x.get::<_, HashMap<String, Option<String>>>(1);
-
-        (records, addresses)
+            .expect("connection failure")
+            .call(payload)
+            .await
+            .expect("call failed");
+    
+        let mut data = rs
+            .result
+            .expect("execution without result")
+            .data;
+    
+        // InkLang error check
+        assert_eq!(data.remove(0), 0);
+    
+        data
     }
+
+    pub fn get_contract(&self, tld: &str) -> Option<AccountId32> {
+        self.tld_to_contract.get(tld).cloned()
+    }
+
+    async fn get_resolver_address(&self, domain: &str) -> String {
+        let (name, tld) = self.process_domain(domain);
+        let contract = self.get_contract(&tld).expect("TLD not supported");
+
+        let msg = (get_selector("get_address"), name).encode();
+        let encoded_resp = self.call_contract(contract, msg).await;
+        
+        let value: Result<AccountId32, u8> = Decode::decode(&mut &encoded_resp[..]).expect("failed to decode");        
+        
+        match value {
+            Ok(v) => v.to_string(),
+            Err(_) => String::new(),
+        }
+    }
+    
+    pub fn update_tld(&mut self, tld: String, contract: Option<AccountId32>) {
+        match contract {
+            None => self.tld_to_contract.remove(&tld),
+            Some(contract) => self.tld_to_contract.insert(tld, contract)
+        };
+    }
+
+    fn process_domain(&self, domain: &str) -> (String, String) {
+        let mut labels = domain.split('.');
+        let name = labels.next().expect("infallible");
+        let tld = labels.collect::<Vec<_>>().join(".");
+
+        (name.into(), tld)
+    }
+}
+
+fn get_selector(name: &str) -> [u8; 4] {
+    let bytes = subxt::config::substrate::BlakeTwo256::hash(name.as_bytes());
+    [bytes[0], bytes[1], bytes[2], bytes[3]]
+}
+
+fn get_alias(coin_type: u64) -> Option<String> {
+    let alias = HashMap::from([
+        (0, "btc"),
+        (60, "eth"),
+        (354, "dot"),
+        (434, "ksm"),
+        (501, "sol"),
+    ]);
+
+    alias.get(&coin_type).map(|&i| i.to_string())
 }
